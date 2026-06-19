@@ -13,7 +13,12 @@ fk_buyer         →  fk1
 Everything runs **locally and in memory**. Nothing is sent or stored anywhere.
 
 ---
-
+<table>
+  <tr>
+    <td><img src="screenshot.png" alt="screenshot" width="400"/></td>
+  </tr>
+</table>
+---
 ## Quick start
 
 ```sh
