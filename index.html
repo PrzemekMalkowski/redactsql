@@ -1,0 +1,454 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<title>redact.sql — schema name scrubber</title>
+<style>
+  :root{
+    --bg:#0e1014; --bg2:#12151b; --panel:#161a21; --panel2:#1b2029;
+    --line:#262c36; --line2:#323a47;
+    --ink:#e9e5da; --muted:#929aa8; --faint:#5d6573;
+    --amber:#e0a458; --amber-dim:#9a7240;
+    --teal:#5fb6a2; --rose:#dc8a78;
+    --kw:#cf92ba; --ty:#7bb0cf; --st:#9cc06a; --nu:#d8a35f; --cm:#5d6573;
+    --mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    --radius:10px;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{
+    margin:0; background:
+      radial-gradient(1200px 600px at 80% -10%, #1a2030 0%, rgba(26,32,48,0) 60%),
+      var(--bg);
+    color:var(--ink); font-family:var(--sans);
+    font-size:15px; line-height:1.5; -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--amber)}
+  .wrap{max-width:1280px; margin:0 auto; padding:28px 22px 60px}
+
+  /* Header / hero */
+  header{display:flex; flex-wrap:wrap; align-items:flex-end; gap:18px 28px; margin-bottom:22px}
+  .brand{display:flex; align-items:baseline; gap:2px; font-family:var(--mono); font-weight:700;
+    letter-spacing:-0.02em; font-size:26px}
+  .brand .dot{color:var(--amber-dim)}
+  .brand .ext{color:var(--amber)}
+  .tag{color:var(--muted); max-width:46ch; font-size:14px}
+  .tag b{color:var(--ink); font-weight:600}
+
+  .signature{margin-left:auto; font-family:var(--mono); font-size:13.5px;
+    display:flex; align-items:center; gap:10px; white-space:nowrap;
+    background:var(--panel); border:1px solid var(--line); border-radius:999px; padding:8px 14px}
+  .signature .kw{color:var(--kw)}
+  .redbar{position:relative; color:transparent; background:#0b0d11;
+    border-radius:3px; padding:1px 7px; overflow:hidden}
+  .redbar::after{content:""; position:absolute; inset:0; background:
+    repeating-linear-gradient(45deg,#0b0d11 0 6px,#15171d 6px 12px)}
+  .arrow{color:var(--faint)}
+  .clean{color:var(--teal); font-weight:600}
+
+  .privacy{display:inline-flex; align-items:center; gap:8px; margin:2px 0 0;
+    font-size:12.5px; color:var(--teal)}
+  .privacy .led{width:7px;height:7px;border-radius:50%;background:var(--teal);
+    box-shadow:0 0 0 0 rgba(95,182,162,.6); animation:pulse 2.6s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(95,182,162,.5)}70%{box-shadow:0 0 0 7px rgba(95,182,162,0)}100%{box-shadow:0 0 0 0 rgba(95,182,162,0)}}
+
+  /* Controls */
+  .controls{display:flex; flex-wrap:wrap; align-items:center; gap:10px 14px;
+    background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    padding:12px 14px; margin-bottom:16px}
+  .ctl{display:flex; align-items:center; gap:8px; font-size:13.5px; color:var(--muted)}
+  .seg{display:flex; border:1px solid var(--line2); border-radius:8px; overflow:hidden}
+  .seg button{appearance:none; border:0; background:transparent; color:var(--muted);
+    font-family:var(--mono); font-size:12.5px; padding:7px 11px; cursor:pointer}
+  .seg button[aria-pressed="true"]{background:var(--panel2); color:var(--ink)}
+  .seg button+button{border-left:1px solid var(--line2)}
+
+  .switch{display:inline-flex; align-items:center; gap:9px; cursor:pointer; user-select:none}
+  .switch input{position:absolute; opacity:0; pointer-events:none}
+  .track{width:38px;height:21px;border-radius:999px;background:#2a313c;
+    border:1px solid var(--line2); position:relative; transition:background .15s}
+  .track::after{content:"";position:absolute;top:1px;left:1px;width:17px;height:17px;
+    border-radius:50%;background:#8a93a1; transition:transform .15s, background .15s}
+  .switch input:checked + .track{background:rgba(224,164,88,.25); border-color:var(--amber-dim)}
+  .switch input:checked + .track::after{transform:translateX(17px); background:var(--amber)}
+  .switch input:focus-visible + .track{outline:2px solid var(--amber); outline-offset:2px}
+  .switch .lbl{color:var(--ink)}
+  .switch .hint{color:var(--faint); font-size:12px}
+
+  .spacer{flex:1 1 auto}
+  button.btn{appearance:none; cursor:pointer; font-family:var(--sans); font-weight:600;
+    font-size:14px; border-radius:8px; padding:9px 14px; border:1px solid var(--line2);
+    background:var(--panel2); color:var(--ink)}
+  button.btn:hover{border-color:var(--faint)}
+  button.btn.primary{background:linear-gradient(180deg,#e7ac61,#d6973f);
+    color:#1a1206; border-color:#caa050; box-shadow:0 1px 0 rgba(255,255,255,.15) inset}
+  button.btn.primary:hover{filter:brightness(1.05)}
+  button.btn:disabled{opacity:.55; cursor:default; filter:none}
+  button.btn.ghost{background:transparent}
+  .kbd{font-family:var(--mono); font-size:11px; color:#1a1206; opacity:.7; margin-left:7px}
+
+  /* Panels */
+  .grid{display:grid; grid-template-columns:1fr 1fr; gap:16px}
+  .panel{background:var(--panel); border:1px solid var(--line); border-radius:var(--radius);
+    display:flex; flex-direction:column; min-height:460px; overflow:hidden}
+  .panel-head{display:flex; align-items:center; gap:10px; padding:10px 14px;
+    border-bottom:1px solid var(--line); background:linear-gradient(180deg,var(--panel2),var(--panel))}
+  .panel-head .label{font-family:var(--mono); font-size:12px; letter-spacing:.08em;
+    text-transform:uppercase; color:var(--muted)}
+  .panel-head .num{font-family:var(--mono); font-size:12px; color:var(--faint)}
+  .panel-head .right{margin-left:auto; display:flex; gap:8px}
+  .iconbtn{appearance:none;border:1px solid var(--line2);background:var(--panel2);
+    color:var(--muted); font-family:var(--mono); font-size:12px; border-radius:7px;
+    padding:5px 9px; cursor:pointer}
+  .iconbtn:hover{color:var(--ink); border-color:var(--faint)}
+  .iconbtn.done{color:var(--teal); border-color:var(--teal)}
+
+  textarea{flex:1; width:100%; resize:none; border:0; outline:0; background:transparent;
+    color:var(--ink); font-family:var(--mono); font-size:13px; line-height:1.6;
+    padding:14px 16px; tab-size:2}
+  textarea::placeholder{color:var(--faint)}
+
+  .out{flex:1; margin:0; overflow:auto; padding:14px 16px; font-family:var(--mono);
+    font-size:13px; line-height:1.6; white-space:pre; tab-size:2}
+  .out .kw{color:var(--kw)} .out .ty{color:var(--ty)} .out .st{color:var(--st)}
+  .out .nu{color:var(--nu)} .out .cm{color:var(--cm); font-style:italic}
+  .out .id{color:var(--ink)} .out .pn{color:var(--muted)}
+  .empty{color:var(--faint); font-family:var(--mono); font-size:13px; padding:14px 16px}
+
+  /* Report strip */
+  .report{margin-top:16px; background:var(--panel); border:1px solid var(--line);
+    border-radius:var(--radius); padding:12px 16px; display:flex; flex-wrap:wrap;
+    gap:8px 22px; align-items:center; font-size:13px; color:var(--muted); min-height:46px}
+  .report .stat{font-family:var(--mono)}
+  .report .stat b{color:var(--ink); font-weight:600}
+  .report .stat .u{color:var(--faint)}
+  .report .drop{color:var(--rose)}
+  .report .ok{color:var(--teal)}
+
+  .err{color:var(--rose); font-family:var(--mono); font-size:13px}
+  footer{margin-top:26px; color:var(--faint); font-size:12.5px; line-height:1.7}
+  footer code{font-family:var(--mono); color:var(--muted)}
+  .ver{float:right; font-family:var(--mono); font-size:11px; color:var(--faint); opacity:.6}
+
+  @media (max-width:880px){
+    .grid{grid-template-columns:1fr}
+    .signature{display:none}
+    header{align-items:flex-start}
+  }
+  @media (prefers-reduced-motion:reduce){
+    .privacy .led{animation:none}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="brand"><span>redact</span><span class="dot">.</span><span class="ext">sql</span></div>
+      <p class="tag"><b>Publish a schema without leaking its names.</b> Paste a definition or a full dump; get back a structurally identical schema with every table, column, and index name generalized.</p>
+      <div class="privacy"><span class="led"></span> Offline — runs on your machine, sends nothing, stores nothing.</div>
+    </div>
+    <div class="signature">
+      <span class="kw">CREATE&nbsp;TABLE</span>
+      <span class="redbar">my_secret_table</span>
+      <span class="arrow">→</span>
+      <span class="clean">table1</span>
+    </div>
+  </header>
+
+  <div class="controls">
+    <div class="ctl">
+      <span>Dialect</span>
+      <div class="seg" id="dialect" role="group" aria-label="SQL dialect">
+        <button data-val="auto" aria-pressed="true">Auto</button>
+        <button data-val="mysql" aria-pressed="false">MySQL</button>
+        <button data-val="postgres" aria-pressed="false">Postgres</button>
+      </div>
+    </div>
+
+    <label class="switch">
+      <input type="checkbox" id="removeFk">
+      <span class="track"></span>
+      <span><span class="lbl">Remove foreign keys</span> <span class="hint">drop FK constraints</span></span>
+    </label>
+
+    <label class="switch">
+      <input type="checkbox" id="keepId" checked>
+      <span class="track"></span>
+      <span><span class="lbl">Keep <code style="font-family:var(--mono)">id</code></span> <span class="hint">don't rename id columns</span></span>
+    </label>
+
+    <div class="spacer"></div>
+
+    <button class="btn ghost" id="exampleBtn" type="button">Load example</button>
+    <button class="btn ghost" id="attachBtn" type="button">Attach file…</button>
+    <input type="file" id="fileInput" accept=".sql,.txt,.ddl,.dump,text/plain" hidden>
+    <button class="btn primary" id="runBtn" type="button">Obfuscate<span class="kbd">⌘/Ctrl ↵</span></button>
+  </div>
+
+  <div class="grid">
+    <section class="panel">
+      <div class="panel-head">
+        <span class="label">Input — your schema</span>
+        <span class="num" id="inCount">0 chars</span>
+        <div class="right">
+          <button class="iconbtn" id="clearBtn" type="button">Clear</button>
+        </div>
+      </div>
+      <textarea id="input" spellcheck="false" autocomplete="off" autocapitalize="off"
+        placeholder="Paste CREATE TABLE statements or a mysqldump / pg_dump here…"></textarea>
+    </section>
+
+    <section class="panel">
+      <div class="panel-head">
+        <span class="label">Output — safe to share</span>
+        <span class="num" id="outCount">0 chars</span>
+        <div class="right">
+          <button class="iconbtn" id="copyBtn" type="button" disabled>Copy</button>
+          <button class="iconbtn" id="dlBtn" type="button" disabled>Download .sql</button>
+        </div>
+      </div>
+      <pre class="out" id="output"><span class="empty">Obfuscated SQL appears here.</span></pre>
+    </section>
+  </div>
+
+  <div class="report" id="report"><span class="stat" style="color:var(--faint)">No run yet — paste a schema and press Obfuscate.</span></div>
+
+  <footer>
+    Table names become <code>table1</code>, columns become <code>&lt;type&gt;_column&lt;n&gt;</code> (e.g. <code>varchar_column1</code>), indexes <code>index1</code>. Foreign keys are rewritten to point at the renamed tables and columns, so relationships survive. Comments, string defaults, and ENUM values are stripped; data rows (<code>INSERT</code>, <code>COPY</code>) and anything that can't be safely transformed are dropped.
+    <br>Same engine on the command line: <code>cat dump.sql | redactsql -o clean.sql -remove-fk</code>
+    <span class="ver">v0.1.0</span>
+  </footer>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var $ = function(id){ return document.getElementById(id); };
+  var input = $("input"), output = $("output");
+  var dialect = "auto";
+
+  // ---- Dialect segmented control ----
+  $("dialect").addEventListener("click", function(e){
+    var b = e.target.closest("button"); if(!b) return;
+    dialect = b.getAttribute("data-val");
+    Array.prototype.forEach.call(this.querySelectorAll("button"), function(x){
+      x.setAttribute("aria-pressed", x === b ? "true" : "false");
+    });
+  });
+
+  // ---- Counters ----
+  function fmt(n){ return n.toLocaleString(); }
+  function updateInCount(){ $("inCount").textContent = fmt(input.value.length) + " chars"; }
+  input.addEventListener("input", updateInCount);
+
+  // ---- File attach (local read, no upload) ----
+  $("attachBtn").addEventListener("click", function(){ $("fileInput").click(); });
+  $("fileInput").addEventListener("change", function(){
+    var f = this.files && this.files[0]; if(!f) return;
+    var r = new FileReader();
+    r.onload = function(){ input.value = r.result; updateInCount(); };
+    r.readAsText(f);
+    this.value = "";
+  });
+
+  // ---- Clear ----
+  $("clearBtn").addEventListener("click", function(){
+    input.value = ""; updateInCount(); input.focus();
+  });
+
+  // ---- Example ----
+  var EXAMPLE =
+"CREATE TABLE my_secret_table1 (\n" +
+"  id int NOT NULL AUTO_INCREMENT,\n" +
+"  my_secret_column1 datetime,\n" +
+"  my_secret_column2 varchar(100),\n" +
+"  customer_email varchar(255) DEFAULT 'noreply@acme.example',\n" +
+"  PRIMARY KEY (`id`),\n" +
+"  KEY `my_index1` (`my_secret_column2`)\n" +
+") ENGINE=InnoDB COMMENT='internal customers';\n\n" +
+"CREATE TABLE secret_orders (\n" +
+"  order_id int NOT NULL,\n" +
+"  buyer_id int,\n" +
+"  total decimal(10,2),\n" +
+"  PRIMARY KEY (`order_id`),\n" +
+"  CONSTRAINT `fk_buyer` FOREIGN KEY (`buyer_id`) REFERENCES `my_secret_table1` (`id`)\n" +
+") ENGINE=InnoDB;\n";
+  $("exampleBtn").addEventListener("click", function(){
+    input.value = EXAMPLE; updateInCount(); run();
+  });
+
+  // ---- SQL syntax highlighter (offline, dependency-free) ----
+  var KW = {}, TY = {};
+  ("create table index unique primary key foreign references constraint check not null " +
+   "default on delete update cascade restrict no action match full alter add column drop " +
+   "sequence type as enum schema using owned by engine charset collate auto_increment " +
+   "generated always stored virtual and or where order asc desc nulls first last in is " +
+   "between like distinct start increment minvalue maxvalue cache cycle exists if only " +
+   "concurrently unsigned zerofill row_format").split(" ").forEach(function(w){ KW[w]=1; });
+  ("int integer int2 int4 int8 smallint bigint tinyint mediumint decimal numeric float " +
+   "float4 float8 double real bit bool boolean char varchar character varying nchar nvarchar " +
+   "text tinytext mediumtext longtext blob tinyblob mediumblob longblob bytea binary varbinary " +
+   "date datetime timestamp timestamptz time timetz year json jsonb uuid money inet cidr macaddr " +
+   "xml interval serial bigserial smallserial precision geometry point").split(" ").forEach(function(w){ TY[w]=1; });
+
+  function esc(s){
+    return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+  function span(cls, s){ return '<span class="'+cls+'">'+esc(s)+'</span>'; }
+
+  function highlight(src){
+    if(src.length > 250000) return esc(src);
+    var out = "", i = 0, n = src.length;
+    function isIdS(c){ return /[A-Za-z_\u0080-\uffff]/.test(c); }
+    function isIdP(c){ return /[A-Za-z0-9_\u0080-\uffff]/.test(c); }
+    while(i < n){
+      var c = src[i];
+      if(c === "-" && src[i+1] === "-"){
+        var j=i; while(j<n && src[j] !== "\n") j++;
+        out += span("cm", src.slice(i,j)); i=j; continue;
+      }
+      if(c === "/" && src[i+1] === "*"){
+        var k=i+2; while(k<n && !(src[k]==="*"&&src[k+1]==="/")) k++;
+        k = (k<n)? k+2 : n; out += span("cm", src.slice(i,k)); i=k; continue;
+      }
+      if(c === "'" || c === "`" || c === '"'){
+        var q=c, p=i+1;
+        while(p<n){
+          if(src[p]==="\\" && q==="'"){ p+=2; continue; }
+          if(src[p]===q){ if(src[p+1]===q){ p+=2; continue; } p++; break; }
+          p++;
+        }
+        var cls = (q==="'") ? "st" : "id";
+        out += span(cls, src.slice(i,p)); i=p; continue;
+      }
+      if(/[0-9]/.test(c) || (c==="." && /[0-9]/.test(src[i+1]||""))){
+        var m=i; while(m<n && /[0-9a-fA-F.xX+\-eE]/.test(src[m])) m++;
+        out += span("nu", src.slice(i,m)); i=m; continue;
+      }
+      if(isIdS(c)){
+        var s=i+1; while(s<n && isIdP(src[s])) s++;
+        var word = src.slice(i,s), lw = word.toLowerCase();
+        if(KW[lw]) out += span("kw", word);
+        else if(TY[lw]) out += span("ty", word);
+        else out += span("id", word);
+        i=s; continue;
+      }
+      if(/[()\[\],.;=<>+\-*/%:|]/.test(c)){ out += span("pn", c); i++; continue; }
+      out += esc(c); i++;
+    }
+    return out;
+  }
+
+  // ---- Output state ----
+  var lastOutput = "";
+  function setOutput(text){
+    lastOutput = text || "";
+    if(lastOutput.trim() === ""){
+      output.innerHTML = '<span class="empty">Nothing transformable found — the input may be data-only, or in an unsupported form.</span>';
+      $("copyBtn").disabled = true; $("dlBtn").disabled = true;
+      $("outCount").textContent = "0 chars";
+      return;
+    }
+    output.innerHTML = highlight(lastOutput);
+    $("copyBtn").disabled = false; $("dlBtn").disabled = false;
+    $("outCount").textContent = fmt(lastOutput.length) + " chars";
+  }
+
+  // ---- Report ----
+  function renderReport(rep){
+    var r = $("report");
+    if(!rep){ r.innerHTML = '<span class="stat err">—</span>'; return; }
+    function stat(label, val){
+      return '<span class="stat"><b>'+val+'</b> <span class="u">'+label+'</span></span>';
+    }
+    var parts = [];
+    parts.push(stat("tables", rep.tables||0));
+    parts.push(stat("columns", rep.columns||0));
+    parts.push(stat("indexes", rep.indexes||0));
+    if(rep.constraints) parts.push(stat("constraints", rep.constraints));
+    if(rep.sequences) parts.push(stat("sequences", rep.sequences));
+    if(rep.types) parts.push(stat("types", rep.types));
+    if(rep.schemas) parts.push(stat("schemas", rep.schemas));
+
+    var dropped = rep.dropped || {};
+    var dkeys = Object.keys(dropped);
+    if(dkeys.length){
+      var total = dkeys.reduce(function(a,k){ return a + dropped[k]; }, 0);
+      var detail = dkeys.sort().map(function(k){ return k+"×"+dropped[k]; }).join(", ");
+      parts.push('<span class="stat drop">⌫ dropped '+total+' <span class="u">('+esc(detail)+')</span></span>');
+    } else {
+      parts.push('<span class="stat ok">✓ nothing dropped</span>');
+    }
+    r.innerHTML = parts.join("");
+  }
+
+  // ---- Run ----
+  var running = false;
+  function run(){
+    if(running) return;
+    var sql = input.value;
+    if(sql.trim() === ""){
+      setOutput(""); renderReport(null);
+      $("report").innerHTML = '<span class="stat err">Paste some SQL first.</span>';
+      return;
+    }
+    running = true;
+    var btn = $("runBtn"); var old = btn.innerHTML;
+    btn.disabled = true; btn.textContent = "Working…";
+
+    fetch("/api/obfuscate", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({
+        sql: sql, dialect: dialect,
+        removeFk: $("removeFk").checked, keepId: $("keepId").checked
+      })
+    }).then(function(res){
+      if(!res.ok) throw new Error("server returned " + res.status);
+      return res.json();
+    }).then(function(data){
+      setOutput(data.output);
+      renderReport(data.report);
+    }).catch(function(err){
+      output.innerHTML = '<span class="empty">Couldn\'t process the schema.</span>';
+      $("report").innerHTML = '<span class="stat err">Error: '+esc(String(err.message||err))+'</span>';
+    }).finally(function(){
+      running = false; btn.disabled = false; btn.innerHTML = old;
+    });
+  }
+  $("runBtn").addEventListener("click", run);
+  document.addEventListener("keydown", function(e){
+    if((e.metaKey || e.ctrlKey) && (e.key === "Enter")){ e.preventDefault(); run(); }
+  });
+
+  // ---- Copy / download ----
+  $("copyBtn").addEventListener("click", function(){
+    var b = this;
+    (navigator.clipboard ? navigator.clipboard.writeText(lastOutput) : Promise.reject())
+      .then(function(){ b.textContent="Copied"; b.classList.add("done");
+        setTimeout(function(){ b.textContent="Copy"; b.classList.remove("done"); },1200); })
+      .catch(function(){
+        var ta=document.createElement("textarea"); ta.value=lastOutput; document.body.appendChild(ta);
+        ta.select(); try{ document.execCommand("copy"); }catch(_){}
+        document.body.removeChild(ta);
+        b.textContent="Copied"; setTimeout(function(){ b.textContent="Copy"; },1200);
+      });
+  });
+  $("dlBtn").addEventListener("click", function(){
+    var blob = new Blob([lastOutput + "\n"], {type:"application/sql"});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.href = url; a.download = "redacted.sql";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(function(){ URL.revokeObjectURL(url); }, 1000);
+  });
+
+  updateInCount();
+})();
+</script>
+</body>
+</html>

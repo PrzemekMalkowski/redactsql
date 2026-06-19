@@ -1,0 +1,8 @@
+# Build output
+redactsql
+redactsql.exe
+
+# Go toolchain
+*.test
+*.out
+/vendor/
