@@ -1,4 +1,6 @@
 # redact.sql
+[![Go](https://img.shields.io/badge/Go-1.21%2B-00ADD8?logo=go)](https://go.dev/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 **Publish a SQL schema without leaking its names.**
 
